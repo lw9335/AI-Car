@@ -1,0 +1,38 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      ROADMIND_ENV: local
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: roadmind
+      POSTGRES_USER: roadmind
+      POSTGRES_PASSWORD: roadmind-local-only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U roadmind"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    profiles: ["infra"]
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    profiles: ["infra"]
+
+  neo4j:
+    image: neo4j:5-community
+    environment:
+      NEO4J_AUTH: neo4j/roadmind-local-only
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    profiles: ["infra"]
