@@ -8,6 +8,7 @@ from roadmind.api.dependencies import principal_from_headers
 from roadmind.application.service import RoadMindService
 from roadmind.domain.auth import Principal, require_scope
 from roadmind.domain.models import (
+    ClosureApproval,
     ClosureRequest,
     DiagnosisMismatch,
     DispatchApproval,
@@ -31,9 +32,11 @@ Service = Annotated[RoadMindService, Depends(service_from_request)]
 
 def present_order(order: Any, principal: Principal) -> dict[str, Any]:
     data = order.model_dump(mode="json")
-    can_view_tokens = principal.role in {Role.DISPATCHER, Role.ADMIN}
     for approval in data["approvals"]:
-        if not can_view_tokens:
+        can_view_token = (
+            principal.role == Role.ADMIN or approval["requested_role"] == principal.role
+        )
+        if not can_view_token:
             approval["token"] = "***"
     return data
 
@@ -118,6 +121,16 @@ def close_work_order(
     service: Service,
 ) -> dict[str, Any]:
     return present_order(service.close_order(order_id, payload, principal), principal)
+
+
+@router.post("/work-orders/{order_id}/close/approve")
+def approve_closure(
+    order_id: str,
+    payload: ClosureApproval,
+    principal: CurrentPrincipal,
+    service: Service,
+) -> dict[str, Any]:
+    return present_order(service.approve_closure(order_id, payload, principal), principal)
 
 
 @router.post("/operations/query")

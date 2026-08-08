@@ -37,7 +37,10 @@ ALLOWED_TRANSITIONS: dict[WorkOrderStatus, set[WorkOrderStatus]] = {
         WorkOrderStatus.DIAGNOSING,
         WorkOrderStatus.MANUAL_TAKEOVER,
     },
-    WorkOrderStatus.WAITING_CLOSE_APPROVAL: {WorkOrderStatus.CLOSED},
+    WorkOrderStatus.WAITING_CLOSE_APPROVAL: {
+        WorkOrderStatus.CLOSED,
+        WorkOrderStatus.IN_SERVICE,
+    },
     WorkOrderStatus.CLOSED: set(),
     WorkOrderStatus.MANUAL_TAKEOVER: {
         WorkOrderStatus.DIAGNOSING,
@@ -58,7 +61,6 @@ def transition(
         raise InvalidTransition(f"{order.status} -> {target} is not allowed")
     previous = order.status
     order.status = target
-    order.version += 1
     order.updated_at = utc_now()
     order.timeline.append(
         TimelineEvent(

@@ -19,7 +19,12 @@ class Principal:
 ROLE_SCOPES: dict[Role, set[str]] = {
     Role.INFORMATION_OFFICER: {"workorder:read", "workorder:create", "diagnosis:run"},
     Role.TECHNICIAN: {"workorder:read", "diagnosis:run", "service:execute"},
-    Role.EXPERT: {"workorder:read", "diagnosis:confirm", "diagnosis:run"},
+    Role.EXPERT: {
+        "workorder:read",
+        "diagnosis:confirm",
+        "diagnosis:run",
+        "service:close_approve",
+    },
     Role.DISPATCHER: {"workorder:read", "dispatch:read", "dispatch:approve"},
     Role.PARTS_MANAGER: {"workorder:read", "parts:read", "parts:reserve"},
     Role.OPERATIONS: {"workorder:read", "metrics:query", "metrics:simulate"},

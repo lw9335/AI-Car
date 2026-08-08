@@ -2,7 +2,7 @@
 
 ## 30 秒版本
 
-> 我做的是 AI 商用车售后维修知识与服务协同平台。核心不是聊天，而是用一张 L0 工单把维修、调度、配件和运营四个 Agent 串起来。Parent 负责动态理解，审批、并行履约和改诊补偿用 LangGraph 固化；诊断用带品牌车型过滤和证据引用的 Hybrid RAG，调度用 CP-SAT，所有业务工具经 MCP Gateway。样板有完整 Web/API 和 19 项测试，外部系统通过适配器生产化。
+> 我做的是 AI 商用车售后维修知识与服务协同平台。核心不是聊天，而是用一张 L0 工单把维修、调度、配件和运营四个 Agent 串起来。Parent 负责动态理解，审批、并行履约和改诊补偿用 LangGraph 固化；诊断用带品牌车型过滤和证据引用的 Hybrid RAG，调度用 CP-SAT，所有业务工具经 MCP Gateway。样板有完整 Web/API 和 21 项测试，外部系统通过适配器生产化。
 
 ## 90 秒版本
 
@@ -95,4 +95,3 @@ Mismatch -> freeze V1 -> compensate -> V2 -> rediagnose。补充 Outbox、Trace 
 - 线上评测更关注模型指标还是业务不变量？
 - 生产 Trace 如何脱敏并进入回归 Dataset？
 - Workflow checkpoint 与业务数据库的版本如何对齐？
-

@@ -13,7 +13,7 @@ function statusIndex(status){return ["reported","triaged","diagnosing","waiting_
 function card(title, body, score=""){return `<div class="card"><b>${title}</b>${body}${score?`<span class="score">${score}</span>`:""}</div>`}
 
 function render(order){
-  current=order;$("#empty").hidden=true;$("#work-order").hidden=false;$("#order-id").textContent=`THREAD ${order.thread_id} · V${order.task_plan?.plan_version||1}`;
+  current=order;$("#empty").hidden=true;$("#work-order").hidden=false;$("#order-id").textContent=`THREAD ${order.thread_id} · ROW V${order.version} · PLAN V${order.task_plan?.plan_version||1}`;
   $("#order-title").textContent=`${order.vehicle.brand} / ${order.vehicle.model} · ${order.dtc_codes.join(",")||"待读取 DTC"}`;$("#status").textContent=order.status.toUpperCase();
   const idx=statusIndex(order.status);$("#progress").innerHTML=Array.from({length:6},(_,i)=>`<i class="${i<=Math.floor(idx/1.7)?"on":""}"></i>`).join("");
   const buttons=[];
@@ -23,10 +23,13 @@ function render(order){
   if(order.status==="ready_for_service")buttons.push(["现场开工","start",true]);
   if(["fulfilling","ready_for_service","in_service"].includes(order.status))buttons.push(["模拟现场改诊","mismatch",false]);
   if(order.status==="in_service")buttons.push(["提交结案","close",true]);
+  if(order.status==="waiting_close_approval")buttons.push(["专家审批结案","close-approve",true]);
   $("#actions").innerHTML=buttons.map(([label,action,hot])=>`<button data-action="${action}" class="${hot?"hot":""}">${label}</button>`).join("");
   $("#actions").querySelectorAll("button").forEach(button=>button.addEventListener("click",()=>act(button.dataset.action)));
   $("#evidence").innerHTML=order.diagnosis?.evidence?.length?order.diagnosis.evidence.map(e=>card(e.title,`${e.section}<br>${e.excerpt}`,`RRF+RERANK ${e.score}`)).join(""):card("尚无证据","运行诊断后展示品牌/车型/版本过滤后的证据链。");
   const fulfillment=[];
+  order.task_plan?.tasks?.forEach(t=>fulfillment.push(card(`${t.task_id} · ${t.status}`,`${t.domain} / ${t.action}`,t.depends_on.length?`AFTER ${t.depends_on.join(" + ")}`:"ROOT")));
+  order.approvals?.filter(a=>a.status==="pending").forEach(a=>fulfillment.push(card(`待审批 · ${a.action}`,`目标角色 ${a.requested_role}`,a.token==="***"?"TOKEN REDACTED":"TOKEN READY")));
   order.dispatch_candidates?.slice(0,2).forEach(r=>fulfillment.push(card(r.display_name,`ETA ${r.eta_minutes} 分钟 · 负载 ${r.workload}`,`SCORE ${r.score}`)));
   order.parts_candidates?.slice(0,3).forEach(p=>fulfillment.push(card(`${p.name} · ${p.part_code}`,`${p.source} · 库存 ${p.stock} · ¥${p.unit_price}`,p.is_oem?"OEM":"AFTERMARKET")));
   $("#fulfillment").innerHTML=fulfillment.join("")||card("等待专家确认","确诊后，调度与配件工作流会并行扇出并 Join。");$("#m-plan").textContent=order.task_plan?.plan_version||1;refreshTelemetry();
@@ -42,6 +45,7 @@ async function act(action){
     if(action==="start")order=await api(`/work-orders/${order.service_request_id}/service/start`,{method:"POST"});
     if(action==="mismatch")order=await api(`/work-orders/${order.service_request_id}/mismatch`,{method:"POST",body:JSON.stringify({actual_code:"P204F",evidence:"现场喷射量测试与远程假设不一致"})});
     if(action==="close")order=await api(`/work-orders/${order.service_request_id}/close`,{method:"POST",body:JSON.stringify({resolution:"更换下游 NOx 传感器，完成自适应学习与路试，故障未复现。",actual_part_codes:order.reserved_part_codes,customer_rating:5})});
+    if(action==="close-approve"){const approval=order.approvals.find(a=>a.action==="service.close"&&a.status==="pending");order=await api(`/work-orders/${order.service_request_id}/close/approve`,{method:"POST",body:JSON.stringify({approval_token:approval.token,approved:true,comment:"结案证据与质量门禁均通过"})});}
     render(order);toast("动作已完成并写入工单时间线");
   }catch(error){toast(error.message,true)}
 }
@@ -52,4 +56,3 @@ $("#role").addEventListener("change",async()=>{if(current){try{render(await api(
 async function refreshTelemetry(){try{const [orders,traces,tools]=await Promise.all([api("/work-orders"),api(`/traces${current?`?service_request_id=${current.service_request_id}`:""}`),api("/tools")]);$("#m-orders").textContent=orders.length;$("#m-spans").textContent=traces.length;$("#m-tools").textContent=tools.length;$("#trace-list").innerHTML=traces.slice(-12).map(t=>`<div class="trace"><b>${t.kind.toUpperCase()}</b>${t.name}<br>${t.status} · ${t.span_id}</div>`).join("")||"<p>暂无调用。</p>"}catch(error){console.warn(error)}}
 window.addEventListener("load",()=>{setTimeout(()=>$("#boot").classList.add("done"),450);document.querySelectorAll(".reveal").forEach((el,i)=>setTimeout(()=>el.classList.add("visible"),180+i*120));refreshTelemetry()});
 let lastY=0;window.addEventListener("scroll",()=>{const y=window.scrollY;document.querySelector(".topbar").classList.toggle("hidden",y>lastY&&y>140);lastY=y},{passive:true});
-

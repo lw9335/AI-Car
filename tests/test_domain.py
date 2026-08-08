@@ -37,6 +37,20 @@ def test_repository_optimistic_lock(service, admin, diesel_request):
         service.repo.save(order, expected_version=999)
 
 
+def test_repository_increments_version_and_rejects_stale_copy(
+    service, admin, diesel_request
+):
+    order = service.create_request(diesel_request, admin)
+    first_writer = service.repo.get(order.service_request_id)
+    stale_writer = service.repo.get(order.service_request_id)
+
+    saved = service.repo.save(first_writer, expected_version=first_writer.version)
+
+    assert saved.version == order.version + 1
+    with pytest.raises(OptimisticLockError):
+        service.repo.save(stale_writer, expected_version=stale_writer.version)
+
+
 def test_role_scope_denies_unrelated_write():
     principal = Principal(user_id="ops", role=Role.OPERATIONS)
     with pytest.raises(PermissionDenied):

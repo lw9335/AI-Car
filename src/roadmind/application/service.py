@@ -10,6 +10,7 @@ from roadmind.agents.parts import PartsAgent
 from roadmind.domain.auth import Principal, require_scope
 from roadmind.domain.models import (
     Approval,
+    ClosureApproval,
     ClosureRequest,
     DiagnosisMismatch,
     DispatchApproval,
@@ -24,6 +25,7 @@ from roadmind.domain.models import (
     TimelineEvent,
     WorkOrder,
     WorkOrderStatus,
+    utc_now,
 )
 from roadmind.domain.state_machine import transition
 from roadmind.infra.observability import TraceRecorder
@@ -170,6 +172,7 @@ class RoadMindService:
         approval = self._pending_approval(order, "diagnosis.confirm")
         approval.status = "approved" if decision.approved else "rejected"
         approval.decided_by = principal.user_id
+        approval.decided_at = utc_now()
         if not decision.approved:
             transition(
                 order,
@@ -221,6 +224,7 @@ class RoadMindService:
         order.selected_resource_id = payload.resource_id
         approval.status = "approved"
         approval.decided_by = principal.user_id
+        approval.decided_at = utc_now()
         self._set_task(
             order, "dispatch", TaskStatus.SUCCEEDED, {"resource_id": payload.resource_id}
         )
@@ -367,30 +371,76 @@ class RoadMindService:
             actor=principal.user_id,
             reason="service_result_submitted",
         )
-        self._set_task(order, "service", TaskStatus.SUCCEEDED, {"resolution": payload.resolution})
+        closure_result = {
+            "resolution": payload.resolution,
+            "actual_part_codes": payload.actual_part_codes,
+            "customer_rating": payload.customer_rating,
+        }
+        self._set_task(order, "service", TaskStatus.WAITING_APPROVAL, closure_result)
+        approval = Approval(action="service.close", requested_role=Role.EXPERT)
+        order.approvals.append(approval)
+        order.timeline.append(
+            TimelineEvent(
+                event_type="service.close_requested",
+                actor=principal.user_id,
+                data={"approval_id": approval.approval_id, **closure_result},
+            )
+        )
+        return self.repo.save(order, expected_version=expected)
+
+    def approve_closure(
+        self, order_id: str, payload: ClosureApproval, principal: Principal
+    ) -> WorkOrder:
+        require_scope(principal, "service:close_approve")
+        order = self.repo.get(order_id)
+        expected = order.version
+        if order.status != WorkOrderStatus.WAITING_CLOSE_APPROVAL:
+            raise ValueError("no closure is awaiting approval")
+        approval = self._pending_approval(order, "service.close")
+        if approval.token != payload.approval_token:
+            raise ValueError("invalid or stale approval token")
+        approval.status = "approved" if payload.approved else "rejected"
+        approval.decided_by = principal.user_id
+        approval.decided_at = utc_now()
+        service_task = self._task(order, "service")
+        if not payload.approved:
+            service_task.status = TaskStatus.RUNNING
+            transition(
+                order,
+                WorkOrderStatus.IN_SERVICE,
+                actor=principal.user_id,
+                reason=payload.comment or "closure_rejected",
+            )
+            return self.repo.save(order, expected_version=expected)
         transition(
             order,
             WorkOrderStatus.CLOSED,
             actor=principal.user_id,
-            reason="closure_invariants_passed",
+            reason=payload.comment or "closure_invariants_approved",
         )
+        service_task.status = TaskStatus.SUCCEEDED
+        closure_result = service_task.result
         self._set_task(
             order,
             "archive",
             TaskStatus.SUCCEEDED,
-            {"quality_gate": "pending_offline_review", "customer_rating": payload.customer_rating},
+            {
+                "quality_gate": "pending_offline_review",
+                "customer_rating": closure_result["customer_rating"],
+            },
         )
         order.timeline.append(
             TimelineEvent(
                 event_type="knowledge.case_candidate_created",
                 actor="closure_workflow",
                 data={
-                    "resolution": payload.resolution,
-                    "actual_part_codes": payload.actual_part_codes,
+                    "resolution": closure_result["resolution"],
+                    "actual_part_codes": closure_result["actual_part_codes"],
                     "publication_status": "quarantine_pending_quality_review",
                 },
             )
         )
+        saved = self.repo.save(order, expected_version=expected)
         self.outbox.append(
             "workorder.closed",
             {
@@ -398,7 +448,7 @@ class RoadMindService:
                 "plan_version": order.task_plan.plan_version if order.task_plan else 1,
             },
         )
-        return self.repo.save(order, expected_version=expected)
+        return saved
 
     def query_operations(self, query: OpsQuery, principal: Principal) -> dict[str, Any]:
         require_scope(principal, "metrics:query")
@@ -477,6 +527,12 @@ class RoadMindService:
         task = next(item for item in order.task_plan.tasks if item.task_id == task_id)
         task.status = status
         task.result = result
+
+    @staticmethod
+    def _task(order: WorkOrder, task_id: str):
+        if not order.task_plan:
+            raise ValueError("work order has no task plan")
+        return next(item for item in order.task_plan.tasks if item.task_id == task_id)
 
     @staticmethod
     def _advance_if_fulfillment_ready(order: WorkOrder) -> None:

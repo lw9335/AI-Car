@@ -44,6 +44,7 @@ class InMemoryWorkOrderRepository:
                 raise OptimisticLockError(
                     f"expected version {expected_version}, current version {current.version}"
                 )
+            order.version = current.version + 1
             order.updated_at = utc_now()
             self._items[order.service_request_id] = deepcopy(order)
             return deepcopy(order)

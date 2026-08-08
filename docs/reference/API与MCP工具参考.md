@@ -23,6 +23,7 @@
 | POST | `/{id}/service/start` | service:execute | READY_FOR_SERVICE |
 | POST | `/{id}/mismatch` | diagnosis:run | 履约或维修中 |
 | POST | `/{id}/close` | service:execute | IN_SERVICE |
+| POST | `/{id}/close/approve` | service:close_approve | WAITING_CLOSE_APPROVAL、token 有效 |
 | POST | `/operations/query` | metrics:query / simulate | question 能映射 metric_id |
 | GET | `/tools` | workorder:read | 无 |
 | GET | `/tool-audit` | admin | 无 |
@@ -90,3 +91,4 @@ tool existence
 - 422 `business_rule`：候选、token、库存、指标等业务校验失败。
 - 422 FastAPI validation：请求 schema 不合法。
 
+`version` 在 Repository 每次成功保存时递增，而不是仅在状态转换时递增。因此调度审批和配件预占即使都停留在 `FULFILLING`，也不能用同一旧版本相互覆盖。

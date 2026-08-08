@@ -251,6 +251,12 @@ class ClosureRequest(BaseModel):
     customer_rating: int = Field(ge=1, le=5)
 
 
+class ClosureApproval(BaseModel):
+    approval_token: str
+    approved: bool
+    comment: str = ""
+
+
 class OpsQuery(BaseModel):
     question: str = Field(min_length=2, max_length=500)
     scope: str = "all"
