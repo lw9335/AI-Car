@@ -7,6 +7,5 @@ if (-not (Test-Path -LiteralPath $VirtualEnv)) {
 }
 
 & (Join-Path $VirtualEnv "Scripts\python.exe") -m pip install --upgrade pip
-& (Join-Path $VirtualEnv "Scripts\python.exe") -m pip install -e "$ProjectRoot[dev]"
+& (Join-Path $VirtualEnv "Scripts\python.exe") -m pip install -e "${ProjectRoot}[dev]"
 Write-Host "RoadMind development environment is ready."
-
