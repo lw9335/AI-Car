@@ -89,14 +89,18 @@ class McpGateway:
         ):
             try:
                 result = spec.handler(arguments)
-                self._failures[tool_name] = 0
+                with self._lock:
+                    self._failures[tool_name] = 0
                 record["status"] = "ok"
                 return result
             except Exception:
-                self._failures[tool_name] += 1
+                with self._lock:
+                    self._failures[tool_name] += 1
+                    failure_count = self._failures[tool_name]
                 record["status"] = "error"
-                if self._failures[tool_name] >= 3:
-                    self._circuit_until[tool_name] = datetime.now(UTC) + timedelta(seconds=30)
+                if failure_count >= 3:
+                    with self._lock:
+                        self._circuit_until[tool_name] = datetime.now(UTC) + timedelta(seconds=30)
                 raise
             finally:
                 with self._lock:
@@ -119,19 +123,32 @@ class McpGateway:
 
     def _check_rate_limit(self, user_id: str) -> None:
         now = datetime.now(UTC)
-        window = self._calls[user_id]
-        while window and now - window[0] > timedelta(minutes=1):
-            window.popleft()
-        if len(window) >= self._limit:
-            raise RateLimitExceeded(user_id)
-        window.append(now)
+        with self._lock:
+            window = self._calls[user_id]
+            while window and now - window[0] > timedelta(minutes=1):
+                window.popleft()
+            if len(window) >= self._limit:
+                raise RateLimitExceeded(user_id)
+            window.append(now)
 
     def _check_circuit(self, tool_name: str) -> None:
-        until = self._circuit_until.get(tool_name)
+        with self._lock:
+            until = self._circuit_until.get(tool_name)
         if until and until > datetime.now(UTC):
             raise CircuitOpen(tool_name)
 
     @staticmethod
     def _redact(arguments: dict[str, Any]) -> dict[str, Any]:
         sensitive = {"phone", "token", "approval_token", "password"}
-        return {key: "***" if key in sensitive else value for key, value in arguments.items()}
+
+        def scrub(value: Any) -> Any:
+            if isinstance(value, dict):
+                return {
+                    key: "***" if key.lower() in sensitive else scrub(item)
+                    for key, item in value.items()
+                }
+            if isinstance(value, list):
+                return [scrub(item) for item in value]
+            return value
+
+        return scrub(arguments)

@@ -45,6 +45,8 @@ tool existence
 -> redacted audit record
 ```
 
+限流窗口、失败计数和熔断状态都在同一网关锁下更新，避免并发请求丢计数。审计脱敏递归遍历对象和数组，不只处理第一层字段。
+
 ## 已注册工具
 
 ### 车辆池
@@ -69,7 +71,7 @@ tool existence
 ### 配件池
 
 - `inventory.search_available`
-- `inventory.reserve`：敏感写、非幂等。
+- `inventory.reserve`：敏感写；同一工单、同一配件集合的重试幂等，不同集合会返回业务冲突。
 - `inventory.release`
 - `pricing.calculate_quote`
 

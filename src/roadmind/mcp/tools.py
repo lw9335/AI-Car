@@ -96,7 +96,7 @@ def build_gateway(
             inventory_reserve,
             ("service_request_id", "part_codes"),
             risk="sensitive_write",
-            idempotent=False,
+            idempotent=True,
         ),
         ToolSpec(
             "inventory.release",

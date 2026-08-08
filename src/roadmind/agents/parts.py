@@ -122,6 +122,11 @@ class PartsAgent:
         if len(part_codes) != len(set(part_codes)):
             raise ValueError("duplicate part code in reservation")
         with self._lock:
+            existing = self._reservations.get(order_id)
+            if existing is not None:
+                if existing == part_codes:
+                    return
+                raise ValueError("order already has a different active parts reservation")
             for code in part_codes:
                 if self._stock.get(code, 0) <= 0:
                     raise ValueError(f"part out of stock: {code}")

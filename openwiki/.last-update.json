@@ -1,6 +1,6 @@
 {
-  "updatedAt": "2026-08-08T02:48:32.702Z",
-  "command": "init",
+  "updatedAt": "2026-08-08T03:14:53.348Z",
+  "command": "update",
   "model": "gpt-5.6-terra",
   "status": "complete",
   "language": "zh-CN"

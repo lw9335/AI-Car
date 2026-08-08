@@ -80,6 +80,27 @@ def test_dispatch_requires_valid_approval_token(service, admin, expert, diesel_r
         raise AssertionError("stale token was accepted")
 
 
+def test_parts_reservation_retry_is_idempotent(service, admin, expert, diesel_request):
+    order = confirm_and_prepare(service, admin, expert, diesel_request)
+    parts_manager = Principal(user_id="parts", role=Role.PARTS_MANAGER)
+    code = order.parts_candidates[0].part_code
+    before = service.parts.snapshot()[code]
+
+    first = service.reserve_parts(
+        order.service_request_id,
+        PartsReservationRequest(part_codes=[code]),
+        parts_manager,
+    )
+    retried = service.reserve_parts(
+        order.service_request_id,
+        PartsReservationRequest(part_codes=[code]),
+        parts_manager,
+    )
+
+    assert service.parts.snapshot()[code] == before - 1
+    assert retried.version == first.version
+
+
 def test_ev_dispatch_candidates_all_have_hv_cert(service, admin, expert, ev_request):
     order = confirm_and_prepare(service, admin, expert, ev_request)
     assert order.dispatch_candidates

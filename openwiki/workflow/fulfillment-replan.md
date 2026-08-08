@@ -61,9 +61,9 @@ sequenceDiagram
 
 ## 主审批路径与 Native interrupt 示例
 
-主工单审批不是 `NativeApprovalWorkflow`：诊断专家和调度员分别通过 `/expert-confirm`、`/dispatch/approve`，以持久在 `WorkOrder.approvals` 中的 `Approval` 和 token 处理。`NativeApprovalWorkflow` 只是 `workflows/langgraph_flows.py` 的小型语义证明：`_human_gate` 调 `interrupt`，`start(thread_id, request)` 和 `resume(thread_id, decision)` 都以该键配置图。
+主工单审批不是 `NativeApprovalWorkflow`：诊断专家、调度员和结案专家分别通过 `/expert-confirm`、`/dispatch/approve`、`/close/approve`，以持久在 `WorkOrder.approvals` 中的 `Approval` 和 token 处理。尤其 `close_order` 只提交结果、创建 `service.close` approval 并停在 `WAITING_CLOSE_APPROVAL`；`approve_closure` 批准才关闭，拒绝则恢复 `IN_SERVICE`。完整结案顺序见[主工单生命周期](work-order-lifecycle.md)。`NativeApprovalWorkflow` 只是 `workflows/langgraph_flows.py` 的小型语义证明：`_human_gate` 调 `interrupt`，`start(thread_id, request)` 和 `resume(thread_id, decision)` 都以该键配置图。
 
-它编译时使用 `MemorySaver`，检查点只在进程内；重启应用就不能恢复。`thread_id == service_request_id` 有助于将来用外部 checkpointer 对齐工单，但当前服务并未将这个示例接到专家/调度 API，也没有持久化检查点。因此不要把 `test_native_langgraph_interrupt_resume` 当作主业务审批的崩溃恢复证明；生产替换需实现持久 checkpointer、审批幂等性和与仓储版本的原子协调。
+它编译时使用 `MemorySaver`，检查点只在进程内；重启应用就不能恢复。`thread_id == service_request_id` 有助于将来用外部 checkpointer 对齐工单，但当前服务并未将这个示例接到任一主审批 API，也没有持久化检查点。因此不要把 `test_native_langgraph_interrupt_resume` 当作诊断、派工或结案审批的崩溃恢复证明；生产替换需实现持久 checkpointer、三类审批的幂等性和与仓储版本的原子协调。
 
 ## 测试
 

@@ -27,7 +27,7 @@ RoadMind 是一个默认可离线运行的商用车售后编排样板：FastAPI 
 | 变更意图 | 先读页面 | 源码入口/符号 | 聚焦测试 | 最小验证 |
 |---|---|---|---|---|
 | 新增或调整工单状态 | [领域模型](domain/work-order.md) | `ALLOWED_TRANSITIONS`、`transition`、`RoadMindService` | `test_domain.py` | `pytest tests/test_domain.py -q` |
-| 修改从报修到结案流程 | [主生命周期](workflow/work-order-lifecycle.md) | `RoadMindService.create_request` 到 `.close_order` | `test_full_workflow.py` | `pytest tests/test_full_workflow.py -q` |
+| 修改从报修到结案流程 | [主生命周期](workflow/work-order-lifecycle.md) | `RoadMindService.create_request` 到 `.close_order` / `.approve_closure` | `test_full_workflow.py` | `pytest tests/test_full_workflow.py -q` |
 | 改诊/补偿/恢复 | [履约与改诊](workflow/fulfillment-replan.md) | `report_mismatch`、`build_mismatch_replan_graph` | `test_mismatch_freezes_plan_and_compensates` | 同上 |
 | 改检索或诊断安全 | [诊断与检索](intelligence/diagnosis-retrieval.md) | `DiagnosisAgent`、`HybridRetriever.search` | `test_diagnosis_and_retrieval.py` | `pytest tests/test_diagnosis_and_retrieval.py -q` |
 | 改调度/配件策略 | [履约与改诊](workflow/fulfillment-replan.md) | `DispatchAgent`、`PartsAgent` | 履约与 EV 测试 | `pytest tests/test_full_workflow.py -q` |
@@ -39,7 +39,7 @@ RoadMind 是一个默认可离线运行的商用车售后编排样板：FastAPI 
 
 - **L0 工单**是跨 Agent 的唯一协调状态，`thread_id = service_request_id`；直接 PII 不在其中。
 - **初诊不等于确诊**：证据和候选件可以在初诊出现，但专家确认码是履约和配件候选的门槛。
-- **Parent 规划，Workflow 执行**：Parent 生成任务依赖；LangGraph 显式处理并行 join 和改诊补偿。`NativeApprovalWorkflow` 只证明内存 checkpoint 的 interrupt/resume，不是主审批实现。
+- **Parent 规划，Workflow 执行**：Parent 生成任务依赖；LangGraph 显式处理并行 join 和改诊补偿。诊断、派工与结案审批都以 `WorkOrder.approvals` 中的 token 为业务真源；`NativeApprovalWorkflow` 只证明内存 checkpoint 的 interrupt/resume，不是主审批实现。
 - **新能源安全是硬约束**：诊断 SOP 禁止远程带电操作，调度必须 `hv_certified`。
 - **事实必须可追溯**：工具走 Gateway，运营问题映射白名单指标，结案知识先隔离而不直接回灌。
 

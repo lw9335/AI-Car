@@ -258,6 +258,10 @@ class RoadMindService:
             selected = list(
                 dict.fromkeys([*selected, *[code for code in [oem, aftermarket] if code]])
             )
+        if order.reserved_part_codes:
+            if order.reserved_part_codes == selected:
+                return order
+            raise ValueError("work order already has a different active parts reservation")
         self.gateway.invoke(
             "inventory.reserve",
             {"service_request_id": order_id, "part_codes": selected},

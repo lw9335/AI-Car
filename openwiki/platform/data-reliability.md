@@ -9,11 +9,11 @@ tags: [reliability, repository, outbox, saga]
 
 默认 `InMemoryWorkOrderRepository` 是以 `RLock` 和 `deepcopy` 实现的测试适配器，目标是保留未来 PostgreSQL 适配器应遵守的契约，而不是提供进程外持久化。`get`、`create`、`save` 都复制对象，避免调用方绕过仓储修改内部状态；`save` 比较 `expected_version` 与当前工单 `version`，不相等即抛 `OptimisticLockError`。
 
-服务方法先取工单与 `expected = order.version`，再通过 `transition` 修改状态，最后保存。状态转移自身增加 `version`，所以并发请求必须重新读取并重试/告知冲突，不能吞掉 409。
+服务方法先取工单与 `expected = order.version`，再按需通过 `transition` 修改状态，最后保存。`transition` 验证状态边并记录事件；`save` 才将版本设置为当前存储版本加一，所以即使没有状态转移的成功保存也会推进 `version`。并发请求必须重新读取并重试/告知冲突，不能吞掉 409。
 
 ## Outbox 与 Saga
 
-`TransactionalOutbox.append` 在创建时加入 `service_request.created`，结案时加入 `workorder.closed`。后者 payload 只有 `service_request_id` 与结案时的 `plan_version`。在 `close_order` 中，它在两个状态转移、任务/隔离时间线写入之后、`repo.save` 之前 append；因此当前内存实现并不保证“工单保存与 outbox append”原子提交，保存失败可能留下已 append 的消息，生产替换必须将两者纳入同一持久事务。
+`TransactionalOutbox.append` 在创建时于 `repo.create` 后加入 `service_request.created`，在 expert 调用 `approve_closure` 成功保存 `CLOSED` 工单后加入 `workorder.closed`。后者 payload 只有 `service_request_id` 与结案时的 `plan_version`；提交结案的 `close_order` 不写该消息。两种顺序都不是原子事务：创建时 outbox append 失败会留下已创建工单但没有消息；结案时 outbox append 失败会留下已关闭工单但没有消息。生产替换必须将工单保存与 outbox 写入纳入同一持久事务。
 
 `pending` 返回 `delivered == false` 的消息；`deliver(publisher)` 在同一内存锁内顺序调用 publisher，**仅**在 publisher 正常返回后标记当前消息 delivered。若 publisher 抛异常，异常立即传播：当前消息未标记，仍会出现在 `pending`；后续消息不会在那次调用中处理，也仍待投递。现有仓库没有专门覆盖 publisher 失败投递的测试，`test_normal_closure_creates_quarantined_case_and_outbox` 只证明新结案消息初始处于 pending；为 `deliver` 或重试语义改动时应补充该失败回归测试。没有数据库事务、重试、去重消费者或消息代理，因此“Transactional”描述的是接口意图而非当前跨存储原子性。
 
