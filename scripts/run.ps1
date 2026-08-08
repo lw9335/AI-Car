@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-& (Join-Path $ProjectRoot ".venv\Scripts\uvicorn.exe") roadmind.main:app --reload --host 127.0.0.1 --port 8000
-
+$Python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+& $Python -m uvicorn roadmind.main:app --reload --host 127.0.0.1 --port 8000
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
