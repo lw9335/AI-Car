@@ -26,7 +26,7 @@ tags: [api, rbac, testing]
 
 ## 错误映射
 
-`main.py:create_app` 统一映射：缺工单 404、权限 403、非法状态与乐观锁 409、`ValueError` 业务规则 422。Pydantic 输入校验由 FastAPI 产生其默认 422。MCP 的 `RateLimitExceeded`、`CircuitOpen` 等目前没有专用映射，调用者不应假定稳定的错误 JSON。
+`main.py:create_app` 统一映射：`WorkOrderNotFound` 与 `ToolNotFound` 为 404，权限为 403，非法状态与乐观锁为 409，`ValueError` 业务规则为 422；Pydantic 输入校验也由 FastAPI 产生默认 422。来自[MCP Gateway](../platform/mcp-security-observability.md)的 `RateLimitExceeded` 是 429、`error: rate_limit_exceeded` 且响应头固定 `Retry-After: 60`；`CircuitOpen` 是 503、`error: upstream_circuit_open`。这是已注册的 HTTP 契约，而 `ToolValidationError` 等其他 Gateway 例外仍没有专用处理器，不能据此推断其稳定错误 JSON。
 
 ## 测试即不变量清单
 
@@ -36,6 +36,6 @@ tags: [api, rbac, testing]
 | 初诊与安全 | `tests/test_diagnosis_and_retrieval.py` | 模式路由、版本化证据、未确诊、HV 门禁、无 DTC 低置信、工具审计/trace 父子。 |
 | MCP 韧性与审计脱敏 | `tests/test_mcp_resilience.py` | 同一 actor 的一分钟限流、连续三次 handler 失败后熔断，以及嵌套字典/列表中 `phone` 与 `approval_token` 的递归脱敏。 |
 | 主履约、结案与改诊 | `tests/test_full_workflow.py` | 并行候选 join、派工/结案审批 token、HV 调度、库存/lease 补偿、隔离结案、关闭拒绝回服务中、interrupt 示例。 |
-| 运营与 API | `tests/test_operations_and_api.py` | 四层运营输出、拒绝自由 SQL、health/静态页、RBAC 与 token 脱敏。 |
+| 运营与 API | `tests/test_operations_and_api.py` | 四层运营输出、拒绝自由 SQL、health/静态页、RBAC 与 token 脱敏；`test_api_maps_rate_limit_to_429_with_retry_after` 与 `test_api_maps_open_circuit_to_503` 分别锁定 Gateway 限流/熔断的消费者响应。 |
 
 窄验证分别用 `pytest tests/test_domain.py -q`、`pytest tests/test_diagnosis_and_retrieval.py -q`、`pytest tests/test_mcp_resilience.py -q`、`pytest tests/test_full_workflow.py -q`。跨域改动运行 `pytest`；风格检查使用 `ruff check .`。这些命令来自 `pyproject.toml` 的 pytest 配置。

@@ -43,6 +43,6 @@ flowchart TD
 
 ## 错误与真实边界
 
-`create_app` 将 `WorkOrderNotFound` 映射为 404，将 `PermissionDenied` 映射为 403，将 `InvalidTransition`、`OptimisticLockError` 映射为 409，将业务 `ValueError` 映射为 422。未注册 MCP 专用异常处理器，故这类异常不应被文档声称为稳定 API 错误契约。
+`create_app` 将 `WorkOrderNotFound`、`ToolNotFound` 映射为 404，将 `PermissionDenied` 映射为 403，将 `InvalidTransition`、`OptimisticLockError` 映射为 409，将业务 `ValueError` 映射为 422。它还将 Gateway 的 `RateLimitExceeded` 映射为带 `Retry-After: 60` 的 429（`error: rate_limit_exceeded`），将 `CircuitOpen` 映射为 503（`error: upstream_circuit_open`）。这使网关韧性机制成为公开 HTTP 契约；错误来源、恢复语义和聚焦测试见[MCP Gateway、权限、审计与 Trace](../platform/mcp-security-observability.md)与[HTTP API、角色与验证矩阵](../reference/api-and-validation.md)。
 
 PostgreSQL、Redis、Neo4j 和 LangSmith 是生产替换意图：Compose 的 `infra` profile 仅声明容器，默认服务没有连接它们。详细运行边界见[运行环境与控制台](../operations/runtime-and-console.md)，数据替换面见[数据可靠性](../platform/data-reliability.md)。
