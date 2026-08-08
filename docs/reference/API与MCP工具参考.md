@@ -90,6 +90,8 @@ tool existence
 - 404 `work_order_not_found`：主键不存在。
 - 409 `invalid_transition`：状态机非法跳转。
 - 409 `optimistic_lock`：版本冲突，需要重新读取。
+- 429 `rate_limit_exceeded`：调用方超过窗口配额，响应带 `Retry-After: 60`。
+- 503 `upstream_circuit_open`：上游工具连续失败后熔断，调用方应退避或降级。
 - 422 `business_rule`：候选、token、库存、指标等业务校验失败。
 - 422 FastAPI validation：请求 schema 不合法。
 

@@ -1,7 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+import json
+
+from fastapi import Request
+
 from roadmind.domain.auth import Principal
 from roadmind.domain.models import OpsQuery, Role
+from roadmind.main import create_app
+from roadmind.mcp.gateway import CircuitOpen, RateLimitExceeded
 
 
 def test_operations_separates_fact_inference_recommendation_and_scenario(
@@ -56,3 +63,24 @@ def test_api_rbac_and_token_redaction(client, diesel_request):
         headers={"X-Role": "operations", "X-User-Id": "ops"},
     )
     assert denied.status_code == 403
+
+
+def test_api_maps_rate_limit_to_429_with_retry_after():
+    app = create_app()
+    request = Request({"type": "http", "method": "GET", "path": "/", "headers": []})
+    handler = app.exception_handlers[RateLimitExceeded]
+    response = asyncio.run(handler(request, RateLimitExceeded("actor-1")))
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "60"
+    assert json.loads(response.body)["error"] == "rate_limit_exceeded"
+
+
+def test_api_maps_open_circuit_to_503():
+    app = create_app()
+    request = Request({"type": "http", "method": "GET", "path": "/", "headers": []})
+    handler = app.exception_handlers[CircuitOpen]
+    response = asyncio.run(handler(request, CircuitOpen("inventory.reserve")))
+
+    assert response.status_code == 503
+    assert json.loads(response.body)["error"] == "upstream_circuit_open"

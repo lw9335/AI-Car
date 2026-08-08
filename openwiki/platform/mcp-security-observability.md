@@ -17,7 +17,7 @@ tags: [mcp, security, observability]
 4. 校验 `required_params` 存在，再开始 tool span。
 5. 执行 handler；成功清零该工具失败计数，失败则记录错误；无论结果都追加审计记录。
 
-审计项带 actor、role、service_request_id、risk、时间和参数；`phone`、`token`、`approval_token`、`password` 被替换为 `***`。这只处理顶层精确键，新增嵌套敏感结构时必须扩展 `_redact`。`TraceRecorder.span` 用 `ContextVar` 建父子关系；`run_diagnosis` 的 `intelligent_maintenance_agent` span 内调用 telemetry，因此工具 span 继承 parent ID。
+审计项带 actor、role、service_request_id、risk、时间和参数；`_redact` 会递归遍历 `dict` 与 `list`，将键名（大小写不敏感）为 `phone`、`token`、`approval_token`、`password` 的值替换为 `***`。它不按值内容识别秘密，也不覆盖未列出的敏感键；新增敏感字段或新的参数容器类型时，必须扩展该集合/遍历逻辑并补回归测试。`TraceRecorder.span` 用 `ContextVar` 建父子关系；`run_diagnosis` 的 `intelligent_maintenance_agent` span 内调用 telemetry，因此工具 span 继承 parent ID。
 
 ## 工具现实边界
 
@@ -27,4 +27,4 @@ tags: [mcp, security, observability]
 
 ## API 可见性与验证
 
-`GET /tools` 要 `workorder:read`，只展示元数据；`GET /tool-audit` 传 `"*"` 给 `require_scope`，因此只有 admin 可读；`GET /traces` 要工单读权限且可按 `service_request_id` 筛选。`tests/test_diagnosis_and_retrieval.py:test_tool_call_is_audited_and_parented_under_agent_trace` 证明 VIN/telemetry 调用入审计且工具 span 有父节点；`tests/test_operations_and_api.py:test_api_rbac_and_token_redaction` 证明非授权写入得 403，且 information officer 的审批 token 被遮蔽。
+`GET /tools` 要 `workorder:read`，只展示元数据；`GET /tool-audit` 传 `"*"` 给 `require_scope`，因此只有 admin 可读；`GET /traces` 要工单读权限且可按 `service_request_id` 筛选。`tests/test_diagnosis_and_retrieval.py:test_tool_call_is_audited_and_parented_under_agent_trace` 证明 VIN/telemetry 调用入审计且工具 span 有父节点；`tests/test_mcp_resilience.py:test_gateway_rate_limit_is_enforced_per_actor`、`test_gateway_opens_circuit_after_three_tool_failures` 和 `test_gateway_recursively_redacts_sensitive_audit_arguments` 分别覆盖按 actor 限流、三次 handler 失败后的熔断和嵌套字典/列表中的敏感参数脱敏。修改 Gateway 时先运行 `pytest tests/test_mcp_resilience.py -q`；若同时改变 HTTP 的角色展示或工单调用链，再附加对应 API 或流程测试。

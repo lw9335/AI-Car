@@ -24,16 +24,16 @@ RoadMind 是一个默认可离线运行的商用车售后编排样板：FastAPI 
 
 ## 按工程意图定位
 
-| 变更意图 | 先读页面 | 源码入口/符号 | 聚焦测试 | 最小验证 |
-|---|---|---|---|---|
-| 新增或调整工单状态 | [领域模型](domain/work-order.md) | `ALLOWED_TRANSITIONS`、`transition`、`RoadMindService` | `test_domain.py` | `pytest tests/test_domain.py -q` |
-| 修改从报修到结案流程 | [主生命周期](workflow/work-order-lifecycle.md) | `RoadMindService.create_request` 到 `.close_order` / `.approve_closure` | `test_full_workflow.py` | `pytest tests/test_full_workflow.py -q` |
-| 改诊/补偿/恢复 | [履约与改诊](workflow/fulfillment-replan.md) | `report_mismatch`、`build_mismatch_replan_graph` | `test_mismatch_freezes_plan_and_compensates` | 同上 |
-| 改检索或诊断安全 | [诊断与检索](intelligence/diagnosis-retrieval.md) | `DiagnosisAgent`、`HybridRetriever.search` | `test_diagnosis_and_retrieval.py` | `pytest tests/test_diagnosis_and_retrieval.py -q` |
-| 改调度/配件策略 | [履约与改诊](workflow/fulfillment-replan.md) | `DispatchAgent`、`PartsAgent` | 履约与 EV 测试 | `pytest tests/test_full_workflow.py -q` |
-| 新增 MCP 工具 | [MCP 平台](platform/mcp-security-observability.md) | `ToolSpec`、`build_gateway` | 审计/RBAC 测试 | `pytest tests/test_diagnosis_and_retrieval.py -q` |
-| 新增运营指标 | [运营智能](intelligence/operations.md) | `METRICS`、`_calculate` | `test_operations_and_api.py` | `pytest tests/test_operations_and_api.py -q` |
-| 替换本地基础设施 | [数据可靠性](platform/data-reliability.md) | repository、outbox、vault、trace | 领域与全流程测试 | `pytest` |
+| 变更意图 | 先读页面 | 源码入口 | 重要符号或类型 | 聚焦测试 | 最小验证 |
+|---|---|---|---|---|---|
+| 新增或调整工单状态 | [领域模型](domain/work-order.md) | `src/roadmind/domain/state_machine.py`、`application/service.py` | `ALLOWED_TRANSITIONS`、`transition`、`RoadMindService` | `test_domain.py` | `pytest tests/test_domain.py -q` |
+| 修改从报修到结案流程 | [主生命周期](workflow/work-order-lifecycle.md) | `src/roadmind/application/service.py` | `RoadMindService.create_request`、`.close_order`、`.approve_closure` | `test_full_workflow.py` | `pytest tests/test_full_workflow.py -q` |
+| 改诊/补偿/恢复 | [履约与改诊](workflow/fulfillment-replan.md) | `src/roadmind/application/service.py`、`workflows/langgraph_flows.py` | `report_mismatch`、`build_mismatch_replan_graph` | `test_mismatch_freezes_plan_and_compensates` | `pytest tests/test_full_workflow.py -q` |
+| 改检索或诊断安全 | [诊断与检索](intelligence/diagnosis-retrieval.md) | `src/roadmind/agents/diagnosis.py`、`knowledge/retrieval.py` | `DiagnosisAgent`、`HybridRetriever.search` | `test_diagnosis_and_retrieval.py` | `pytest tests/test_diagnosis_and_retrieval.py -q` |
+| 改调度/配件策略 | [履约与改诊](workflow/fulfillment-replan.md) | `src/roadmind/agents/dispatch.py`、`agents/parts.py` | `DispatchAgent`、`PartsAgent` | 履约与 EV 测试 | `pytest tests/test_full_workflow.py -q` |
+| 新增 MCP 工具或改审计防线 | [MCP 平台](platform/mcp-security-observability.md) | `src/roadmind/mcp/gateway.py`、`mcp/tools.py` | `ToolSpec`、`McpGateway.invoke`、`build_gateway` | `test_mcp_resilience.py` | `pytest tests/test_mcp_resilience.py -q` |
+| 新增运营指标 | [运营智能](intelligence/operations.md) | `src/roadmind/agents/operations.py` | `METRICS`、`_calculate` | `test_operations_and_api.py` | `pytest tests/test_operations_and_api.py -q` |
+| 替换本地基础设施 | [数据可靠性](platform/data-reliability.md) | `src/roadmind/infra/` | repository、outbox、vault、trace | 领域与全流程测试 | `pytest` |
 
 ## 核心概念速记
 

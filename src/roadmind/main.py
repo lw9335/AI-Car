@@ -12,6 +12,7 @@ from roadmind.application.service import RoadMindService
 from roadmind.domain.auth import PermissionDenied
 from roadmind.domain.state_machine import InvalidTransition
 from roadmind.infra.repository import OptimisticLockError, WorkOrderNotFound
+from roadmind.mcp.gateway import CircuitOpen, RateLimitExceeded, ToolNotFound
 
 
 def create_app() -> FastAPI:
@@ -53,6 +54,27 @@ def create_app() -> FastAPI:
     async def optimistic_lock(_: Request, exc: OptimisticLockError) -> JSONResponse:
         return JSONResponse(
             status_code=409, content={"error": "optimistic_lock", "detail": str(exc)}
+        )
+
+    @app.exception_handler(RateLimitExceeded)
+    async def rate_limited(_: Request, exc: RateLimitExceeded) -> JSONResponse:
+        return JSONResponse(
+            status_code=429,
+            content={"error": "rate_limit_exceeded", "detail": str(exc)},
+            headers={"Retry-After": "60"},
+        )
+
+    @app.exception_handler(CircuitOpen)
+    async def circuit_open(_: Request, exc: CircuitOpen) -> JSONResponse:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "upstream_circuit_open", "detail": str(exc)},
+        )
+
+    @app.exception_handler(ToolNotFound)
+    async def tool_not_found(_: Request, exc: ToolNotFound) -> JSONResponse:
+        return JSONResponse(
+            status_code=404, content={"error": "tool_not_found", "detail": str(exc)}
         )
 
     @app.exception_handler(ValueError)

@@ -34,7 +34,8 @@ tags: [api, rbac, testing]
 |---|---|---|
 | L0/PII/版本/状态 | `tests/test_domain.py` | 同 ID thread、PII 不进工单、显式 Vault 授权、跳转拒绝、乐观锁、scope 拒绝。 |
 | 初诊与安全 | `tests/test_diagnosis_and_retrieval.py` | 模式路由、版本化证据、未确诊、HV 门禁、无 DTC 低置信、工具审计/trace 父子。 |
+| MCP 韧性与审计脱敏 | `tests/test_mcp_resilience.py` | 同一 actor 的一分钟限流、连续三次 handler 失败后熔断，以及嵌套字典/列表中 `phone` 与 `approval_token` 的递归脱敏。 |
 | 主履约、结案与改诊 | `tests/test_full_workflow.py` | 并行候选 join、派工/结案审批 token、HV 调度、库存/lease 补偿、隔离结案、关闭拒绝回服务中、interrupt 示例。 |
 | 运营与 API | `tests/test_operations_and_api.py` | 四层运营输出、拒绝自由 SQL、health/静态页、RBAC 与 token 脱敏。 |
 
-窄验证分别用 `pytest tests/test_domain.py -q`、`pytest tests/test_diagnosis_and_retrieval.py -q`、`pytest tests/test_full_workflow.py -q`。跨域改动运行 `pytest`；风格检查使用 `ruff check .`。这些命令来自 `pyproject.toml` 的 pytest 配置。
+窄验证分别用 `pytest tests/test_domain.py -q`、`pytest tests/test_diagnosis_and_retrieval.py -q`、`pytest tests/test_mcp_resilience.py -q`、`pytest tests/test_full_workflow.py -q`。跨域改动运行 `pytest`；风格检查使用 `ruff check .`。这些命令来自 `pyproject.toml` 的 pytest 配置。
