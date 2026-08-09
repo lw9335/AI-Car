@@ -34,13 +34,28 @@ def test_operations_rejects_free_form_sql(service):
         raise AssertionError("free-form SQL should not be accepted")
 
 
-def test_health_and_static_console(client):
+def test_health_endpoint(client):
     response = client.get("/api/v1/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
-    page = client.get("/")
-    assert page.status_code == 200
-    assert "RoadMind" in page.text
+
+
+def test_login_and_bearer_auth(client, diesel_request):
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "admin", "password": "roadmind123"},
+    )
+    assert login.status_code == 200
+    token = login.json()["access_token"]
+    created = client.post(
+        "/api/v1/work-orders",
+        json=diesel_request.model_dump(mode="json"),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert created.status_code == 201
+    me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.status_code == 200
+    assert me.json()["role"] == "admin"
 
 
 def test_api_rbac_and_token_redaction(client, diesel_request):
@@ -63,6 +78,18 @@ def test_api_rbac_and_token_redaction(client, diesel_request):
         headers={"X-Role": "operations", "X-User-Id": "ops"},
     )
     assert denied.status_code == 403
+
+
+def test_manual_takeover_resume(service, admin, diesel_request):
+    from roadmind.domain.models import WorkOrderStatus
+
+    order = service.create_request(diesel_request, admin)
+    # Bypass lifecycle to isolate resume behavior under degraded mode.
+    order.status = WorkOrderStatus.MANUAL_TAKEOVER
+    order = service.repo.save(order, expected_version=order.version)
+    resumed = service.resume_manual_takeover(order.service_request_id, admin)
+    assert resumed.status == WorkOrderStatus.REDIAGNOSIS_REQUIRED
+    assert resumed.degraded_mode is True
 
 
 def test_api_maps_rate_limit_to_429_with_retry_after():

@@ -28,17 +28,33 @@
 | GET | `/tools` | workorder:read | 无 |
 | GET | `/tool-audit` | admin | 无 |
 | GET | `/traces` | workorder:read | 可选 service_request_id |
+| POST | `/mcp`（MCP 服务） | 按工具动态校验 | MCP 2026-07-28 JSON-RPC 请求 |
 
 完整 schema 以运行时 `/docs` 为准。
+
+## MCP Streamable HTTP
+
+RoadMind 实现 MCP `2026-07-28` 的无会话请求/响应模式。每个 `POST /mcp` 请求必须携带：
+
+- `Authorization: Bearer ...`（测试环境也可使用 `X-Role` / `X-User-Id`）；
+- `Accept: application/json, text/event-stream`；
+- `MCP-Protocol-Version: 2026-07-28`；
+- `Mcp-Method`，调用工具时还必须有与 `params.name` 相同的 `Mcp-Name`；
+- `params._meta` 中的协议版本、clientInfo 和 clientCapabilities。
+
+支持 `server/discover`、`tools/list`、`tools/call`。`tools/list` 仅返回当前身份有权调用的工具，并提供确定顺序、`inputSchema`、缓存 TTL 和 private cache scope；`tools/call` 同时返回文本 content 和 structuredContent。
+
+Compose 中 `/api/*` 路由到业务 API，`/mcp` 路由到独立 `mcp-gateway:8001`。业务 API 使用 `RemoteMcpGateway` 发起相同的标准协议请求；远程限流、熔断和业务错误会还原为 API 的 429、503 和 422 语义。
 
 ## MCP Gateway 执行顺序
 
 ```text
-tool existence
+HTTP header/body routing consistency
+-> tool existence
 -> principal scope
 -> per-user rate limit
 -> circuit state
--> required params
+-> JSON Schema params
 -> trace span
 -> handler
 -> failure counter/circuit
@@ -65,6 +81,7 @@ tool existence
 ### 调度池
 
 - `workflow.assign_resource`：敏感写、非幂等，要求审批 scope。
+- `workflow.release_resource`：改诊 Saga 的资源租约补偿，仍经过网关审计。
 - `map.calculate_eta`
 - `notification.send`
 

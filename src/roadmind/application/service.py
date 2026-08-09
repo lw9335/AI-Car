@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from roadmind.agents.diagnosis import DiagnosisAgent
-from roadmind.agents.dispatch import DispatchAgent
-from roadmind.agents.operations import OperationsAgent
-from roadmind.agents.parent import DeterministicParentAgent
-from roadmind.agents.parts import PartsAgent
+from roadmind.application.ports import (
+    DiagnosisCapability,
+    DispatchCapability,
+    OperationsCapability,
+    PartsCapability,
+)
+from roadmind.auth.users import UserStore
 from roadmind.domain.auth import Principal, require_scope
 from roadmind.domain.models import (
     Approval,
@@ -29,41 +31,44 @@ from roadmind.domain.models import (
 )
 from roadmind.domain.state_machine import transition
 from roadmind.infra.observability import TraceRecorder
-from roadmind.infra.outbox import TransactionalOutbox
-from roadmind.infra.pii_vault import PiiVault
-from roadmind.infra.repository import InMemoryWorkOrderRepository
-from roadmind.mcp.tools import build_gateway
+from roadmind.infra.outbox import OutboxStore
+from roadmind.infra.pii_vault import PiiStore
+from roadmind.infra.repository import WorkOrderRepository
+from roadmind.mcp.gateway import ToolGateway
+from roadmind.mcp.tools import RoadMindToolPort
 from roadmind.workflows.langgraph_flows import (
     NativeApprovalWorkflow,
     build_mismatch_replan_graph,
     build_parallel_fulfillment_graph,
 )
+from roadmind.workflows.task_planner import WorkOrderPlanner
+
+if TYPE_CHECKING:
+    from roadmind.bootstrap import AppContainer
 
 
 class RoadMindService:
     MAX_REPLANS = 3
 
-    def __init__(self) -> None:
-        self.repo = InMemoryWorkOrderRepository()
-        self.vault = PiiVault()
-        self.traces = TraceRecorder()
-        self.outbox = TransactionalOutbox()
-        self.parent = DeterministicParentAgent()
-        self.diagnosis = DiagnosisAgent()
-        self.dispatch = DispatchAgent()
-        self.parts = PartsAgent()
-        self.operations = OperationsAgent()
-        self.gateway = build_gateway(self.traces, self.repo, self.dispatch, self.parts)
+    def __init__(self, container: AppContainer) -> None:
+        self.repo: WorkOrderRepository = container.repo
+        self.vault: PiiStore = container.vault
+        self.traces: TraceRecorder = container.traces
+        self.outbox: OutboxStore = container.outbox
+        self.planner: WorkOrderPlanner = container.planner
+        self.users: UserStore = container.users
+        self.diagnosis: DiagnosisCapability = container.diagnosis_service
+        self.dispatch: DispatchCapability = container.dispatch_service
+        self.parts: PartsCapability = container.parts_service
+        self.operations: OperationsCapability = container.operations_service
+        self.settings = container.settings
+        self.gateway: ToolGateway = container.gateway
+        self.tools: RoadMindToolPort = container.tools
         self.native_approval = NativeApprovalWorkflow()
 
     def create_request(self, payload: ServiceRequestCreate, principal: Principal) -> WorkOrder:
         require_scope(principal, "workorder:create")
-        decoded = self.gateway.invoke(
-            "vehicle.decode_vin",
-            {"vin": payload.vehicle.vin},
-            principal=principal,
-            service_request_id="pending",
-        )
+        decoded = self.tools.decode_vin(payload.vehicle.vin, principal)
         if not decoded["valid"]:
             raise ValueError("VIN failed DMS adapter validation")
         pii_ref = self.vault.put(
@@ -85,9 +90,12 @@ class RoadMindService:
                 data={"thread_id": order.thread_id, "pii_ref": pii_ref},
             )
         )
-        order.task_plan = self.parent.plan(order)
+        order.task_plan = self.planner.plan(order)
         transition(
-            order, WorkOrderStatus.TRIAGED, actor="parent_agent", reason="intent_and_route_ready"
+            order,
+            WorkOrderStatus.TRIAGED,
+            actor="work_order_planner",
+            reason="intent_and_route_ready",
         )
         self.repo.create(order)
         self.outbox.append(
@@ -127,12 +135,7 @@ class RoadMindService:
             plan_version=order.task_plan.plan_version if order.task_plan else 1,
         ):
             system = Principal(user_id="maintenance_agent", role=Role.ADMIN)
-            self.gateway.invoke(
-                "telemetry.get_live_signals",
-                {"service_request_id": order_id},
-                principal=system,
-                service_request_id=order_id,
-            )
+            self.tools.get_live_signals(order_id, order.telemetry, system)
             order.diagnosis = self.diagnosis.diagnose(order)
         self._set_task(
             order, "diagnose", TaskStatus.SUCCEEDED, {"diagnosis_id": order.diagnosis.diagnosis_id}
@@ -215,12 +218,7 @@ class RoadMindService:
         if approval.token != payload.approval_token:
             raise ValueError("invalid or stale approval token")
         self.dispatch.verify_assignment(order, payload.resource_id)
-        self.gateway.invoke(
-            "workflow.assign_resource",
-            {"service_request_id": order_id, "resource_id": payload.resource_id},
-            principal=principal,
-            service_request_id=order_id,
-        )
+        self.tools.assign_resource(order_id, payload.resource_id, principal)
         order.selected_resource_id = payload.resource_id
         approval.status = "approved"
         approval.decided_by = principal.user_id
@@ -262,12 +260,7 @@ class RoadMindService:
             if order.reserved_part_codes == selected:
                 return order
             raise ValueError("work order already has a different active parts reservation")
-        self.gateway.invoke(
-            "inventory.reserve",
-            {"service_request_id": order_id, "part_codes": selected},
-            principal=principal,
-            service_request_id=order_id,
-        )
+        self.tools.reserve_inventory(order_id, selected, principal)
         order.reserved_part_codes = selected
         self._set_task(order, "parts", TaskStatus.SUCCEEDED, {"part_codes": selected})
         order.timeline.append(
@@ -292,6 +285,28 @@ class RoadMindService:
         )
         return self.repo.save(order, expected_version=expected)
 
+    def resume_manual_takeover(self, order_id: str, principal: Principal) -> WorkOrder:
+        require_scope(principal, "diagnosis:run")
+        order = self.repo.get(order_id)
+        expected = order.version
+        if order.status != WorkOrderStatus.MANUAL_TAKEOVER:
+            raise ValueError("work order is not in manual takeover")
+        order.degraded_mode = True
+        transition(
+            order,
+            WorkOrderStatus.REDIAGNOSIS_REQUIRED,
+            actor=principal.user_id,
+            reason="manual_takeover_resume_degraded",
+        )
+        order.timeline.append(
+            TimelineEvent(
+                event_type="manual_takeover.resumed",
+                actor=principal.user_id,
+                data={"degraded_mode": True},
+            )
+        )
+        return self.repo.save(order, expected_version=expected)
+
     def report_mismatch(
         self, order_id: str, payload: DiagnosisMismatch, principal: Principal
     ) -> WorkOrder:
@@ -310,13 +325,11 @@ class RoadMindService:
             return {"frozen": True}
 
         def compensate(state: dict[str, Any]) -> dict[str, Any]:
-            if order.selected_resource_id:
-                self.dispatch.lease_book.release(order.selected_resource_id, order_id)
-            released = self.parts.release(order_id)
+            system = Principal(user_id="orchestrator", role=Role.ADMIN)
+            released = self.tools.release_fulfillment(order_id, order.selected_resource_id, system)
             return {
                 "compensated": True,
-                "released_resource": order.selected_resource_id,
-                "released_parts": released,
+                **released,
             }
 
         graph = build_mismatch_replan_graph(freeze, compensate)
@@ -326,7 +339,7 @@ class RoadMindService:
             *(order.task_plan.frozen_versions if order.task_plan else []),
             old_version,
         ]
-        order.task_plan = self.parent.plan(
+        order.task_plan = self.planner.plan(
             order,
             version=result["new_plan_version"],
             reason="diagnosis_mismatch_replan",
@@ -475,8 +488,12 @@ class RoadMindService:
             }
 
         def parts_node(state: dict[str, Any]) -> dict[str, Any]:
+            system = Principal(user_id="orchestrator", role=Role.ADMIN)
+            stock = self.tools.inventory_snapshot(order.service_request_id, system)
             return {
-                "parts_candidates": [item.model_dump() for item in self.parts.candidates(order)]
+                "parts_candidates": [
+                    item.model_dump() for item in self.parts.candidates(order, stock=stock)
+                ]
             }
 
         graph = build_parallel_fulfillment_graph(dispatch_node, parts_node)

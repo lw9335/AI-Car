@@ -1,38 +1,94 @@
 services:
-  app:
-    build: .
-    ports:
-      - "8000:8000"
-    environment:
-      ROADMIND_ENV: local
   postgres:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_DB: roadmind
-      POSTGRES_USER: roadmind
-      POSTGRES_PASSWORD: roadmind-local-only
+      POSTGRES_DB: ${POSTGRES_DB:-roadmind}
+      POSTGRES_USER: ${POSTGRES_USER:-roadmind}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-roadmind-change-me}
+    volumes:
+      - roadmind_pg:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U roadmind"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-roadmind}"]
       interval: 5s
       timeout: 3s
       retries: 10
-    profiles: ["infra"]
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - roadmind_redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
-    profiles: ["infra"]
+    restart: unless-stopped
 
-  neo4j:
-    image: neo4j:5-community
+  mcp-gateway:
+    build: .
+    command: ["uvicorn", "roadmind.mcp.main:app", "--host", "0.0.0.0", "--port", "8001"]
     environment:
-      NEO4J_AUTH: neo4j/roadmind-local-only
+      ROADMIND_ENV: ${ROADMIND_ENV:-local}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-roadmind}:${POSTGRES_PASSWORD:-roadmind-change-me}@postgres:5432/${POSTGRES_DB:-roadmind}
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-roadmind-dev-secret-change-me-32chars}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://127.0.0.1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    expose:
+      - "8001"
+
+  api:
+    build: .
+    environment:
+      ROADMIND_ENV: ${ROADMIND_ENV:-local}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-roadmind}:${POSTGRES_PASSWORD:-roadmind-change-me}@postgres:5432/${POSTGRES_DB:-roadmind}
+      REDIS_URL: redis://redis:6379/0
+      MCP_GATEWAY_URL: http://mcp-gateway:8001/mcp
+      MCP_REQUEST_TIMEOUT_SECONDS: ${MCP_REQUEST_TIMEOUT_SECONDS:-5}
+      JWT_SECRET: ${JWT_SECRET:-roadmind-dev-secret-change-me-32chars}
+      JWT_TTL_MINUTES: ${JWT_TTL_MINUTES:-720}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:-roadmind123}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://127.0.0.1}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-nvidia/nemotron-nano-9b-v2:free}
+      WORK_ORDER_PLANNER_MODE: ${WORK_ORDER_PLANNER_MODE:-auto}
+      ASSISTANT_MODE: ${ASSISTANT_MODE:-deterministic}
+      ASSISTANT_API_KEY: ${ASSISTANT_API_KEY:-}
+      ASSISTANT_BASE_URL: ${ASSISTANT_BASE_URL:-}
+      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mcp-gateway:
+        condition: service_healthy
+    restart: unless-stopped
+    expose:
+      - "8000"
+
+  web:
+    build: ./web
     ports:
-      - "7474:7474"
-      - "7687:7687"
-    profiles: ["infra"]
+      - "${WEB_PORT:-80}:80"
+    depends_on:
+      - api
+      - mcp-gateway
+    restart: unless-stopped
+
+volumes:
+  roadmind_pg:
+  roadmind_redis:

@@ -1,16 +1,24 @@
 from __future__ import annotations
 
-from typing import Annotated
+from fastapi import Request
 
-from fastapi import Header
+from roadmind.application.service import RoadMindService
+from roadmind.assistant.service import EnterpriseAssistantService
+from roadmind.auth.dependencies import get_principal
+from roadmind.mcp.gateway import ToolGateway
 
-from roadmind.domain.auth import Principal
-from roadmind.domain.models import Role
+
+def service_from_request(request: Request) -> RoadMindService:
+    return request.app.state.roadmind
 
 
-def principal_from_headers(
-    x_user_id: Annotated[str, Header()] = "demo-user",
-    x_role: Annotated[Role, Header()] = Role.ADMIN,
-    x_region: Annotated[str, Header()] = "south_china",
-) -> Principal:
-    return Principal(user_id=x_user_id, role=x_role, region=x_region)
+def gateway_from_request(request: Request) -> ToolGateway:
+    return request.app.state.tool_gateway
+
+
+def assistant_from_request(request: Request) -> EnterpriseAssistantService:
+    return request.app.state.enterprise_assistant
+
+
+# Backwards-compatible alias used by older tests/imports.
+principal_from_headers = get_principal

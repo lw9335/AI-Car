@@ -6,6 +6,7 @@ from threading import RLock
 
 from ortools.sat.python import cp_model
 
+from roadmind.application.ports import LeaseConflict, ResourceLease
 from roadmind.domain.models import DispatchCandidate, ServiceMode, WorkOrder
 
 
@@ -66,10 +67,6 @@ RESOURCES = [
 ]
 
 
-class LeaseConflict(RuntimeError):
-    pass
-
-
 class ResourceLeaseBook:
     """Redis-lease semantics implemented locally for deterministic tests."""
 
@@ -95,7 +92,7 @@ class ResourceLeaseBook:
 class DispatchAgent:
     """Hard-filter then jointly rank skill, ETA, workload and mode compatibility."""
 
-    def __init__(self, lease_book: ResourceLeaseBook | None = None) -> None:
+    def __init__(self, lease_book: ResourceLease | None = None) -> None:
         self.lease_book = lease_book or ResourceLeaseBook()
 
     def candidates(self, order: WorkOrder) -> list[DispatchCandidate]:
@@ -187,6 +184,11 @@ class DispatchAgent:
         if resource_id not in {item.resource_id for item in order.dispatch_candidates}:
             raise ValueError("resource was not in the validated candidate set")
         self.lease_book.reserve(resource_id, order.service_request_id)
+
+    def release(self, resource_id: str, order_id: str) -> None:
+        """Release through the domain port without exposing the lease adapter."""
+
+        self.lease_book.release(resource_id, order_id)
 
     def verify_assignment(self, order: WorkOrder, resource_id: str) -> None:
         candidate = next(

@@ -5,9 +5,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from threading import RLock
-from typing import Any
+from typing import Any, Protocol
 
-from roadmind.domain.auth import Principal, require_scope
+from roadmind.domain.auth import ROLE_SCOPES, Principal, require_scope
 from roadmind.infra.observability import TraceRecorder
 
 
@@ -35,6 +35,34 @@ class ToolSpec:
     required_params: tuple[str, ...] = ()
     risk: str = "read"
     idempotent: bool = True
+    description: str = ""
+    input_schema: dict[str, Any] | None = None
+
+    def mcp_input_schema(self) -> dict[str, Any]:
+        if self.input_schema is not None:
+            return self.input_schema
+        return {
+            "type": "object",
+            "properties": {name: {} for name in self.required_params},
+            "required": list(self.required_params),
+        }
+
+
+class ToolGateway(Protocol):
+    """Application-facing port implemented by local or remote MCP gateways."""
+
+    def invoke(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        principal: Principal,
+        service_request_id: str,
+    ) -> dict[str, Any]: ...
+
+    def list_tools(self, principal: Principal | None = None) -> list[dict[str, Any]]: ...
+
+    def audit_log(self, principal: Principal | None = None) -> list[dict[str, Any]]: ...
 
 
 class McpGateway:
@@ -67,9 +95,7 @@ class McpGateway:
         require_scope(principal, spec.required_scope)
         self._check_rate_limit(principal.user_id)
         self._check_circuit(tool_name)
-        missing = [name for name in spec.required_params if name not in arguments]
-        if missing:
-            raise ToolValidationError(f"missing required params: {missing}")
+        self._validate_arguments(spec, arguments)
 
         record = {
             "tool": tool_name,
@@ -106,18 +132,27 @@ class McpGateway:
                 with self._lock:
                     self._audit.append(record)
 
-    def list_tools(self) -> list[dict[str, Any]]:
-        return [
+    def list_tools(self, principal: Principal | None = None) -> list[dict[str, Any]]:
+        tools = [
             {
                 "name": spec.name,
+                "description": spec.description or spec.name,
+                "inputSchema": spec.mcp_input_schema(),
                 "required_scope": spec.required_scope,
                 "risk": spec.risk,
                 "idempotent": spec.idempotent,
+                "annotations": {
+                    "readOnlyHint": spec.risk == "read",
+                    "destructiveHint": spec.risk == "destructive_write",
+                    "idempotentHint": spec.idempotent,
+                },
             }
             for spec in self._tools.values()
+            if principal is None or self._has_scope(principal, spec.required_scope)
         ]
+        return sorted(tools, key=lambda item: item["name"])
 
-    def audit_log(self) -> list[dict[str, Any]]:
+    def audit_log(self, principal: Principal | None = None) -> list[dict[str, Any]]:
         with self._lock:
             return list(self._audit)
 
@@ -136,6 +171,46 @@ class McpGateway:
             until = self._circuit_until.get(tool_name)
         if until and until > datetime.now(UTC):
             raise CircuitOpen(tool_name)
+
+    @staticmethod
+    def _has_scope(principal: Principal, scope: str) -> bool:
+        scopes = ROLE_SCOPES[principal.role]
+        return "*" in scopes or scope in scopes
+
+    @staticmethod
+    def _validate_arguments(spec: ToolSpec, arguments: dict[str, Any]) -> None:
+        schema = spec.mcp_input_schema()
+        required = schema.get("required", spec.required_params)
+        missing = [name for name in required if name not in arguments]
+        if missing:
+            raise ToolValidationError(f"missing required params: {missing}")
+
+        properties = schema.get("properties", {})
+        if schema.get("additionalProperties") is False:
+            unexpected = sorted(set(arguments) - set(properties))
+            if unexpected:
+                raise ToolValidationError(f"unexpected params: {unexpected}")
+
+        type_map: dict[str, tuple[type, ...]] = {
+            "array": (list,),
+            "boolean": (bool,),
+            "integer": (int,),
+            "number": (int, float),
+            "object": (dict,),
+            "string": (str,),
+        }
+        for name, value in arguments.items():
+            property_schema = properties.get(name, {})
+            expected_name = property_schema.get("type")
+            expected = type_map.get(expected_name)
+            boolean_number = expected_name in {"integer", "number"} and isinstance(value, bool)
+            if expected and (not isinstance(value, expected) or boolean_number):
+                raise ToolValidationError(f"param {name!r} must be {expected_name}")
+            if expected_name == "array" and isinstance(value, list):
+                item_name = property_schema.get("items", {}).get("type")
+                item_type = type_map.get(item_name)
+                if item_type and any(not isinstance(item, item_type) for item in value):
+                    raise ToolValidationError(f"items in param {name!r} must be {item_name}")
 
     @staticmethod
     def _redact(arguments: dict[str, Any]) -> dict[str, Any]:

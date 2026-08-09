@@ -139,6 +139,8 @@ def test_mismatch_freezes_plan_and_compensates(service, admin, expert, diesel_re
     assert not order.reserved_part_codes
     assert service.parts.snapshot()[code] == before
     assert any(event.event_type == "saga.compensated" for event in order.timeline)
+    compensated_tools = {item["tool"] for item in service.gateway.audit_log()}
+    assert {"workflow.release_resource", "inventory.release"} <= compensated_tools
 
 
 def test_normal_closure_creates_quarantined_case_and_outbox(service, admin, expert, diesel_request):
@@ -193,9 +195,7 @@ def test_rejected_closure_returns_to_service(service, admin, expert, diesel_requ
     dispatcher = Principal(user_id="dispatcher", role=Role.DISPATCHER)
     parts_manager = Principal(user_id="parts", role=Role.PARTS_MANAGER)
     tech = Principal(user_id="tech", role=Role.TECHNICIAN)
-    dispatch_approval = next(
-        item for item in order.approvals if item.action == "dispatch.assign"
-    )
+    dispatch_approval = next(item for item in order.approvals if item.action == "dispatch.assign")
     order = service.approve_dispatch(
         order.service_request_id,
         DispatchApproval(

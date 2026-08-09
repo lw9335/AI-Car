@@ -4,10 +4,14 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from threading import RLock
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
+from sqlalchemy import select
+from sqlalchemy.orm import sessionmaker
+
 from roadmind.domain.models import utc_now
+from roadmind.infra.db import outbox_messages, session_scope
 
 
 @dataclass
@@ -17,6 +21,14 @@ class OutboxMessage:
     message_id: str = field(default_factory=lambda: f"msg_{uuid4().hex[:12]}")
     created_at: datetime = field(default_factory=utc_now)
     delivered: bool = False
+
+
+class OutboxStore(Protocol):
+    def append(self, topic: str, payload: dict[str, Any]) -> OutboxMessage: ...
+
+    def pending(self) -> list[OutboxMessage]: ...
+
+    def deliver(self, publisher: Callable[[OutboxMessage], None]) -> int: ...
 
 
 class TransactionalOutbox:
@@ -43,6 +55,59 @@ class TransactionalOutbox:
                 publisher(message)
                 message.delivered = True
                 delivered += 1
+        return delivered
+
+
+class PostgresTransactionalOutbox:
+    def __init__(self, session_factory: sessionmaker) -> None:
+        self._sessions = session_factory
+
+    def append(self, topic: str, payload: dict[str, Any]) -> OutboxMessage:
+        message = OutboxMessage(topic=topic, payload=payload)
+        with session_scope(self._sessions) as session:
+            session.execute(
+                outbox_messages.insert().values(
+                    message_id=message.message_id,
+                    topic=message.topic,
+                    payload=message.payload,
+                    created_at=message.created_at,
+                    delivered=False,
+                )
+            )
+        return message
+
+    def pending(self) -> list[OutboxMessage]:
+        with session_scope(self._sessions) as session:
+            rows = (
+                session.execute(
+                    select(outbox_messages).where(outbox_messages.c.delivered.is_(False))
+                )
+                .mappings()
+                .all()
+            )
+            return [
+                OutboxMessage(
+                    message_id=row["message_id"],
+                    topic=row["topic"],
+                    payload=dict(row["payload"]),
+                    created_at=row["created_at"],
+                    delivered=bool(row["delivered"]),
+                )
+                for row in rows
+            ]
+
+    def deliver(self, publisher: Callable[[OutboxMessage], None]) -> int:
+        messages = self.pending()
+        delivered = 0
+        for message in messages:
+            publisher(message)
+            with session_scope(self._sessions) as session:
+                session.execute(
+                    outbox_messages.update()
+                    .where(outbox_messages.c.message_id == message.message_id)
+                    .values(delivered=True)
+                )
+            delivered += 1
         return delivered
 
 

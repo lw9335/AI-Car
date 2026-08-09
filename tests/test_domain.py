@@ -37,9 +37,7 @@ def test_repository_optimistic_lock(service, admin, diesel_request):
         service.repo.save(order, expected_version=999)
 
 
-def test_repository_increments_version_and_rejects_stale_copy(
-    service, admin, diesel_request
-):
+def test_repository_increments_version_and_rejects_stale_copy(service, admin, diesel_request):
     order = service.create_request(diesel_request, admin)
     first_writer = service.repo.get(order.service_request_id)
     stale_writer = service.repo.get(order.service_request_id)

@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import os
+
+# Force offline adapters + header auth for the suite before settings are cached.
+os.environ["ROADMIND_ENV"] = "test"
+os.environ.pop("DATABASE_URL", None)
+os.environ.pop("REDIS_URL", None)
+
 import pytest
 from fastapi.testclient import TestClient
 
 from roadmind.application.service import RoadMindService
+from roadmind.bootstrap import build_container
 from roadmind.domain.auth import Principal
 from roadmind.domain.models import (
     Brand,
@@ -14,11 +22,16 @@ from roadmind.domain.models import (
     VehicleProfile,
 )
 from roadmind.main import create_app
+from roadmind.mcp.main import create_mcp_app
+from roadmind.settings import get_settings
+
+get_settings.cache_clear()
 
 
 @pytest.fixture
 def service() -> RoadMindService:
-    return RoadMindService()
+    get_settings.cache_clear()
+    return RoadMindService(build_container())
 
 
 @pytest.fixture
@@ -75,4 +88,11 @@ def ev_request() -> ServiceRequestCreate:
 
 @pytest.fixture
 def client() -> TestClient:
+    get_settings.cache_clear()
     return TestClient(create_app())
+
+
+@pytest.fixture
+def mcp_client() -> TestClient:
+    get_settings.cache_clear()
+    return TestClient(create_mcp_app())

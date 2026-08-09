@@ -44,6 +44,7 @@ ALLOWED_TRANSITIONS: dict[WorkOrderStatus, set[WorkOrderStatus]] = {
     WorkOrderStatus.CLOSED: set(),
     WorkOrderStatus.MANUAL_TAKEOVER: {
         WorkOrderStatus.DIAGNOSING,
+        WorkOrderStatus.REDIAGNOSIS_REQUIRED,
         WorkOrderStatus.WAITING_CLOSE_APPROVAL,
     },
 }

@@ -83,7 +83,9 @@ class PartsAgent:
         self._reservations: dict[str, list[str]] = {}
         self._lock = RLock()
 
-    def candidates(self, order: WorkOrder) -> list[PartCandidate]:
+    def candidates(
+        self, order: WorkOrder, *, stock: dict[str, int] | None = None
+    ) -> list[PartCandidate]:
         if not order.diagnosis or not order.diagnosis.confirmed_code:
             raise ValueError("parts recommendation requires an expert-confirmed diagnosis")
         evidence_map = {
@@ -92,6 +94,7 @@ class PartsAgent:
             for part in order.diagnosis.candidate_part_codes
         }
         requested = set(order.diagnosis.candidate_part_codes)
+        available_stock = stock if stock is not None else self.snapshot()
         results = []
         for item in PARTS:
             compatible = (
@@ -109,7 +112,7 @@ class PartsAgent:
                     name=item["name"],
                     compatibility=f"{order.vehicle.vin} / {order.vehicle.configuration_code}",
                     source=item["source"],
-                    stock=self._stock[item["part_code"]],
+                    stock=available_stock.get(item["part_code"], 0),
                     eta_hours=item["eta_hours"],
                     unit_price=item["unit_price"],
                     is_oem=item["is_oem"],
